@@ -4,6 +4,7 @@ const animeav1Service = require("./animeav1.service");
 const jkanimeService = require("./jkanime.service");
 const animeflvService = require("./animeflv.service");
 const hentailaService = require("./hentaila.service");
+const tioanimeService = require("./tioanime.service");
 
 const DEFAULT_ANIME_DOMAIN = process.env.DEFAULT_ANIME_DOMAIN || "animeav1.com";
 
@@ -31,6 +32,12 @@ const PROVIDERS = [
     label: "HentaiLA",
     domains: ["hentaila.com", "www.hentaila.com"],
     service: hentailaService,
+  },
+  {
+    id: "tioanime",
+    label: "TioAnime",
+    domains: ["tioanime.com", "www.tioanime.com"],
+    service: tioanimeService,
   },
 ];
 

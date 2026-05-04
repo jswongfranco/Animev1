@@ -8,6 +8,7 @@ const PROVIDERS = [
   { title: "🌐 AnimeAV1", value: "animeav1.com" },
   { title: "🔥 AnimeFLV", value: "animeflv.net" },
   { title: "🇯🇵 JKAnime", value: "jkanime.net" },
+  { title: "📺 TioAnime", value: "tioanime.com" },
   { title: "🍑 HentaiLA", value: "hentaila.com" },
 ];
 
@@ -17,6 +18,7 @@ const PROVIDER_DOMAINS = {
   "www4.animeflv.net": "AnimeFLV",
   "jkanime.net": "JKAnime",
   "hentaila.com": "HentaiLA",
+  "tioanime.com": "TioAnime",
 };
 
 function detectProvider(input) {

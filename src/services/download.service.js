@@ -122,7 +122,7 @@ const HTML_HEADERS = {
   "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 };
 
-const SERVER_PRIORITY = ["pdrain", "1fichier", "mp4upload", "upnshare","hls", "mega"];
+const SERVER_PRIORITY = ["yourupload", "pdrain", "1fichier", "mp4upload", "upnshare","hls", "mega"];
 
 function getDownloadsDir() {
   const configuredPath = process.env.DOWNLOADS_DIR || "downloads";
@@ -296,6 +296,10 @@ function isLikelyVideoUrl(url) {
     ".js?",
     "analytics",
     "pixel",
+    "bigbuckbunny",
+    "test-videos",
+    "sample-video",
+    "placeholder",
   ];
 
   for (const pattern of excludePatterns) {
@@ -544,10 +548,26 @@ async function resolveVoeUrl(url, referer) {
     const { html, headers } = await fetchHtmlWithHeaders(url, referer);
     debugLog("VOE", "Fetched HTML length", html.length);
 
+    // Check for redirect in page
+    const redirectMatch = html.match(/window\.location\.href\s*=\s*['"](https?:\/\/[^'"]+)['"]/i);
+    if (redirectMatch && redirectMatch[1]) {
+      debugLog("VOE", "Following redirect to", redirectMatch[1]);
+      const redirectHtml = await fetchHtmlWithHeaders(redirectMatch[1], referer);
+      const extracted = findFirstUrl(redirectHtml.html, [
+        /sources?\s*:\s*\[\s*\{[^}]*src\s*:\s*["']([^"']+)["']/i,
+        /"file"\s*:\s*"([^"]+)"/i,
+        /(https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)[^\s"'<>]*)/i,
+      ]);
+      if (extracted) {
+        debugLog("VOE", "Found URL via redirect", extracted);
+        return extracted;
+      }
+    }
+
     const extracted = findFirstUrl(html, [
       /sources?\s*:\s*\[\s*\{[^}]*src\s*:\s*["']([^"']+)["']/i,
       /"file"\s*:\s*"([^"]+)"/i,
-      /video\([^\)]+\)\s*src\s*:\s*"([^"]+)"/i,
+      /(https?:\/\/[^\s"'<>]+\.(?:mp4|m3u8)[^\s"'<>]*)/i,
     ]);
 
     if (extracted) {
