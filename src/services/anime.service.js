@@ -5,6 +5,7 @@ const jkanimeService = require("./jkanime.service");
 const animeflvService = require("./animeflv.service");
 const hentailaService = require("./hentaila.service");
 const tioanimeService = require("./tioanime.service");
+const monoschinosService = require("./monoschinos.service");
 
 const DEFAULT_ANIME_DOMAIN = process.env.DEFAULT_ANIME_DOMAIN || "animeav1.com";
 
@@ -38,6 +39,12 @@ const PROVIDERS = [
     label: "TioAnime",
     domains: ["tioanime.com", "www.tioanime.com"],
     service: tioanimeService,
+  },
+  {
+    id: "monoschinos",
+    label: "MonosChinos",
+    domains: ["monoschinos2.com", "www.monoschinos2.com"],
+    service: monoschinosService,
   },
 ];
 

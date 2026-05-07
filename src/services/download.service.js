@@ -36,12 +36,44 @@ async function resolveEmbedWithPuppeteer(url, referer) {
     if (referer) {
       await page.setExtraHTTPHeaders({ Referer: referer });
     }
+
+    let interceptedUrl = null;
+    page.on("request", (req) => {
+      const rUrl = req.url();
+      if (!interceptedUrl && (rUrl.includes('.m3u8') || rUrl.includes('.mp4')) && !rUrl.startsWith("blob:") && !rUrl.includes("blank")) {
+        interceptedUrl = rUrl;
+      }
+    });
     
     // Wait for page to fully load
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     
-    // Wait for potential JS to execute
-    await new Promise(r => setTimeout(r, 5000));
+    // Attempt to click play buttons to trigger video load
+    try {
+      const playBtnSelectors = '.play-button, button, .vjs-big-play-button, [role="button"], .jw-icon-display, .plyr__control--overlaid';
+      const playBtn = await page.$(playBtnSelectors);
+      if (playBtn) await playBtn.click();
+    } catch(e) {}
+
+    // Wait for potential JS to execute and requests to fire
+    await new Promise(r => setTimeout(r, 4000));
+
+    // Try clicking inside iframes (common in SPAs like new Filemoon)
+    if (!interceptedUrl) {
+      for (const frame of page.frames()) {
+        try {
+          const playBtn = await frame.$('.play-button, button, .vjs-big-play-button, [role="button"], .jw-icon-display, .plyr__control--overlaid');
+          if (playBtn) await playBtn.click();
+        } catch(e) {}
+      }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    if (interceptedUrl) {
+      debugLog("Puppeteer", "Intercepted media URL", interceptedUrl);
+      await page.close();
+      return interceptedUrl;
+    }
     
     const html = await page.content();
     await page.close();
@@ -783,132 +815,104 @@ async function resolveEmbedUrl(url, record, candidate) {
 
   debugLog("resolveEmbed", `Host: ${host}, Path: ${pathname}`, url);
 
-  // For embeds from protected sites (AnimeFLV, JKAnime), try puppeteer first
-  const isProtectedSite = /animeflv|jkanime|streamwish|voe|vidhide|mixdrop/i.test(host) || /\/e\//.test(pathname);
-  
-  if (isProtectedSite) {
-    debugLog("resolveEmbed", "Using puppeteer for protected site", null);
-    const resolved = await resolveEmbedWithPuppeteer(url, referer);
-    if (resolved) {
-      return resolved;
-    }
-  }
-
-  if (/streamwish|sfastwish|flaswish/i.test(host) && /\/e\//.test(pathname)) {
+  // 1. SPECIFIC DOMAIN RESOLVERS FIRST
+  if (/streamwish|sfastwish|flaswish/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamwish resolver", null);
     const resolved = await resolveStreamwishUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Streamwish");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en Streamwish");
     return resolved;
   }
 
-  if (/streamtape/i.test(host) && /(\/e\/|\/v\/)/.test(pathname)) {
+  if (/streamtape/i.test(host)) {
     debugLog("resolveEmbed", "Using Streamtape resolver", null);
     const resolved = await resolveStreamtapeUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Streamtape");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en Streamtape");
     return resolved;
   }
 
   if (/1fichier/i.test(host)) {
     debugLog("resolveEmbed", "Using 1Fichier resolver", null);
     const resolved = await resolveOneFichierUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en 1Fichier");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en 1Fichier");
     return resolved;
   }
 
   if (/yourupload/i.test(host)) {
     debugLog("resolveEmbed", "Using YourUpload resolver", null);
     const resolved = await resolveYourUploadUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en YourUpload");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en YourUpload");
     return resolved;
   }
 
   if (/ok\.ru|okru/i.test(host)) {
     debugLog("resolveEmbed", "Using Okru resolver", null);
     const resolved = await resolveOkruUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Okru");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en Okru");
     return resolved;
   }
 
   if (/embedsito|fembed|mycloud/i.test(host)) {
     debugLog("resolveEmbed", "Using Fembed resolver", null);
     const resolved = await resolveFembedUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Fembed");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en Fembed");
     return resolved;
   }
 
   if (/hqq\.tv|netu|waaw/i.test(host)) {
     debugLog("resolveEmbed", "Using Hqq/Netu resolver", null);
     const resolved = await resolveHqqUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Hqq/Netu");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en Hqq/Netu");
     return resolved;
   }
 
   if (/jkplayers|jkanime/i.test(host) || /\/jkplayer\//.test(pathname)) {
     debugLog("resolveEmbed", "Using JKPlayer resolver", null);
     const resolved = await resolveJKPlayerUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en JKPlayer");
-    }
-    return resolved;
-  }
-
-  if (/voe\.sx/i.test(host) || /\/e\//.test(pathname)) {
-    debugLog("resolveEmbed", "Using VOE resolver", null);
-    const resolved = await resolveVoeUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en VOE");
-    }
+    if (!resolved) throw new Error("No se pudo resolver enlace directo en JKPlayer");
     return resolved;
   }
 
   if (/vidhidevip|vidhide/i.test(host)) {
     debugLog("resolveEmbed", "Using Vidhide resolver", null);
     const resolved = await resolveVidhideUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Vidhide");
-    }
-    return resolved;
+    if (resolved) return resolved;
   }
 
   if (/bysekoze|filemoon/i.test(host)) {
     debugLog("resolveEmbed", "Using Filemoon resolver", null);
     const resolved = await resolveFilemoonUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Filemoon");
-    }
-    return resolved;
+    if (resolved) return resolved;
   }
 
   if (/mixdrop/i.test(host)) {
     debugLog("resolveEmbed", "Using Mixdrop resolver", null);
     const resolved = await resolveMixdropUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Mixdrop");
-    }
-    return resolved;
+    if (resolved) return resolved;
   }
 
   if (/dsvplay|doodstream/i.test(host)) {
     debugLog("resolveEmbed", "Using Doodstream resolver", null);
     const resolved = await resolveDoodstreamUrl(url, referer);
-    if (!resolved) {
-      throw new Error("No se pudo resolver enlace directo en Doodstream");
+    if (resolved) return resolved;
+  }
+
+  // 2. VOE AND DYNAMIC DOMAINS
+  if (/voe\.sx/i.test(host) || /\/e\//.test(pathname)) {
+    debugLog("resolveEmbed", "Using VOE resolver", null);
+    const resolved = await resolveVoeUrl(url, referer);
+    if (resolved) return resolved;
+    // Don't throw if it was a dynamic domain catch, let it fallback to Puppeteer
+    if (/voe\.sx/i.test(host)) {
+      throw new Error("No se pudo resolver enlace directo en VOE");
     }
-    return resolved;
+  }
+
+  // 3. PUPPETEER PROTECTED SITE FALLBACK
+  const isProtectedSite = /animeflv|streamwish|vidhide|mixdrop/i.test(host);
+  if (isProtectedSite) {
+    debugLog("resolveEmbed", "Using puppeteer for protected site", null);
+    const resolved = await resolveEmbedWithPuppeteer(url, referer);
+    if (resolved) return resolved;
   }
 
   // Fallback: use puppeteer for any unresolved embed

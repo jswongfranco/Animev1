@@ -5,11 +5,12 @@ const animeService = require("./src/services/anime.service");
 const downloadService = require("./src/services/download.service");
 
 const PROVIDERS = [
-  { title: "🌐 AnimeAV1", value: "animeav1.com" },
-  { title: "🔥 AnimeFLV", value: "animeflv.net" },
-  { title: "🇯🇵 JKAnime", value: "jkanime.net" },
-  { title: "📺 TioAnime", value: "tioanime.com" },
+  { title: " AnimeAV1", value: "animeav1.com" },
+  { title: " AnimeFLV", value: "animeflv.net" },
+  { title: " JKAnime", value: "jkanime.net" },
+  { title: " TioAnime", value: "tioanime.com" },
   { title: "🍑 HentaiLA", value: "hentaila.com" },
+  { title: " MonosChinos", value: "monoschinos2.com" },
 ];
 
 const PROVIDER_DOMAINS = {
@@ -19,6 +20,7 @@ const PROVIDER_DOMAINS = {
   "jkanime.net": "JKAnime",
   "hentaila.com": "HentaiLA",
   "tioanime.com": "TioAnime",
+  "monoschinos2.com": "MonosChinos",
 };
 
 function detectProvider(input) {

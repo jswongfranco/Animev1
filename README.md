@@ -25,6 +25,7 @@ Esta herramienta fue desarrollada para facilitar la consulta y consumo de conten
 | **TioAnime** | Sí | Sí | Sí | Sí | YourUpload recomendado |
 | **HentaiLA** | Sí | Sí | Sí | Parcial | SvelteKit, API `__data.json` |
 | **JKAnime** | Sí | Sí | Sí | No | JKPlayer con cifrado fuerte |
+| **MonosChinos**| Sí | Sí | Sí | Sí | Base64 decoding nativo |
 
 ### Servidores de Video Soportados
 
@@ -37,6 +38,10 @@ Esta herramienta fue desarrollada para facilitar la consulta y consumo de conten
 | **StreamTape** | Puppeteer | - | Protección JS |
 | **VOE** | Redirect | - | Filtro anti-fake |
 | **VidHide** | No | - | Cifrado fuerte |
+| **Filemoon** | Unpacker JS | Sí | Extrae m3u8 nativamente |
+| **Doodstream** | Unpacker JS | - | Bypass de tokens por JS |
+| **Mixdrop** | Unpacker JS | - | Decodificación nativa |
+| **Luluvideo** | Puppeteer | Sí | Resuelto vía interceptación |
 | **MP4Upload** | HTML | - | Embed HTML |
 | **HLS / Zilla** | Sí | Sí | FFmpeg con headers |
 | **PixelDrain** | Directo | - | API `/api/file/{id}?download` |
@@ -45,7 +50,7 @@ Esta herramienta fue desarrollada para facilitar la consulta y consumo de conten
 
 ## Características Principales
 
-- **Multi-Proveedor**: AnimeAV1, AnimeFLV, TioAnime, HentaiLA, JKAnime — búsqueda unificada.
+- **Multi-Proveedor**: AnimeAV1, AnimeFLV, TioAnime, HentaiLA, JKAnime, MonosChinos — búsqueda unificada.
 - **Puppeteer Anti-Bot**: Resuelve páginas con protección JavaScript (Cloudflare, fingerprinting, SvelteKit).
 - **Filtro Anti-Fake**: Detecta y rechaza videos falsos (Big Buck Bunny, test-videos, placeholders).
 - **Descargador Nativo**: Cola de descargas directo al disco con soporte HLS (`ffmpeg`).
@@ -102,7 +107,7 @@ node descargador.js
 
 **Novedades en v2:**
 1. Selección de modo: búsqueda / link directo / link de anime
-2. Selector de proveedor (AnimeAV1, AnimeFLV, TioAnime, HentaiLA, JKAnime)
+2. Selector de proveedor (AnimeAV1, AnimeFLV, TioAnime, HentaiLA, JKAnime, MonosChinos)
 3. Resultados con fuente del proveedor
 4. Selector de idioma (SUB / DUB)
 5. Resumen antes de confirmar descarga
@@ -212,6 +217,7 @@ anime1v-api/
 │   │   ├── jkanime.service.js     # JKAnime
 │   │   ├── tioanime.service.js    # TioAnime (NUEVO)
 │   │   ├── hentaila.service.js    # HentaiLA (NUEVO)
+│   │   ├── monoschinos.service.js # MonosChinos (NUEVO)
 │   │   └── download.service.js    # Motor de descarga + resolvers
 │   ├── utils/
 │   │   └── api-error.js
