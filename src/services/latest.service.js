@@ -48,7 +48,41 @@ function parseEpisodeNumber(text) {
 
 function parseTimeAgo(text) {
     if (!text) return null;
-    return text.trim();
+    // Captura: "hace X minutos", "hace X horas", "hace un día", "hace X días"
+    const match = text.match(/hace\s+(?:un|\d+)\s+(?:minuto|hora|día|semana|mes)[s]?/i);
+    return match ? match[0].trim() : null;
+}
+
+function cleanTitle(text) {
+    if (!text) return null;
+    
+    // Eliminar patrones comunes del texto "sucio"
+    let cleaned = text
+        // Quitar "hace X tiempo" al inicio
+        .replace(/^hace\s+(?:un|\d+)\s+(?:minuto|hora|día|semana|mes)[s]?\s*\d*\s*/i, "")
+        // Quitar "Episodio X" 
+        .replace(/Episodio\s+\d+\s*/i, "")
+        // Quitar números sueltos al inicio
+        .replace(/^\d+\s+/, "")
+        // Quitar "Ver NombreDelAnime X" al final
+        .replace(/Ver\s+.+?\s*\d*$/, "")
+        // Quitar "TV Anime • XXXX • En emisión" y todo lo que sigue
+        .replace(/TV\s+Anime\s+•.*$/, "")
+        // Quitar géneros (palabras juntas como AcciónAventuraFantasía)
+        .replace(/(?:Acción|Aventura|Fantasía|Shounen|Comedia|Drama|Romance|Escolares){2,}/g, "")
+        // Limpiar espacios extra
+        .trim();
+    
+    // Si después de limpiar queda muy corto o vacío, intentar extraer de otra forma
+    if (!cleaned || cleaned.length < 3) {
+        // Buscar el patrón: después de "Episodio X" viene el título
+        const titleMatch = text.match(/Episodio\s+\d+\s+(.+?)(?:\s+Ver\s+|$)/i);
+        if (titleMatch) {
+            cleaned = titleMatch[1].trim();
+        }
+    }
+    
+    return cleaned || null;
 }
 
 async function getLatestEpisodes() {
@@ -56,104 +90,36 @@ async function getLatestEpisodes() {
     const $ = cheerio.load(html);
     const episodes = [];
 
-    // Selectores para encontrar la sección "Recientemente Actualizado"
-    const sectionSelectors = [
-        "section:has(h2:contains('Recientemente Actualizado'))",
-        "section:has(h3:contains('Recientemente Actualizado'))",
-        "div:has(> h2:contains('Recientemente Actualizado'))",
-        "div:has(> h3:contains('Recientemente Actualizado'))",
-        "[class*='recent']",
-        "[class*='latest']",
-        "[class*='episode']",
-    ];
-
-    let section = null;
-    for (const selector of sectionSelectors) {
-        const found = $(selector);
-        if (found.length > 0) {
-            section = found.first();
-            break;
-        }
-    }
-
-    // Si no encontramos la sección, buscar en toda la página
-    const container = section || $("body");
-
-    // Buscar items de episodio
-    const itemSelectors = [
-        "article",
-        ".card",
-        "[class*='card']",
-        "[class*='item']",
-        "[class*='episode']",
-        "a[href*='/ver/']",
-        "a[href*='/episodio/']",
-    ];
-
-    let items = $();
-    for (const selector of itemSelectors) {
-        const found = container.find(selector);
-        if (found.length > 0) {
-            items = found;
-            break;
-        }
-    }
-
-    // Fallback: buscar todos los links que contengan "Episodio"
-    if (items.length === 0) {
-        $("a, article, .card").each((_, element) => {
-            const el = $(element);
-            const text = el.text();
-            if (text.includes("Episodio") && text.includes("hace")) {
-                items = items.add(el);
-            }
-        });
-    }
-
-    items.each((_, element) => {
+    // Buscar todos los artículos/cards que tengan "Episodio" en su texto
+    $("article, .card, [class*='card'], [class*='item'], a").each((_, element) => {
         const el = $(element);
+        const text = el.text();
+
+        // Solo procesar si contiene "Episodio" y "hace"
+        if (!text.includes("Episodio") || !text.includes("hace")) {
+            return;
+        }
 
         // Imagen
         const img = el.find("img").first();
         const image = resolveAbsoluteUrl(img.attr("src") || img.attr("data-src"));
 
-        // Título del anime
-        const titleEl = el.find("h3, h4, h2, .title, [class*='title'], [class*='name']").first();
-        let title = titleEl.text().trim();
+        // Extraer número de episodio
+        const episode = parseEpisodeNumber(text);
+        const episodeText = episode ? `Episodio ${episode}` : null;
 
-        // Si no hay título en elementos comunes, buscar en el texto general
-        if (!title) {
-            const allText = el.text();
-            const lines = allText.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-            // El título suele ser la línea más larga o la que no contiene "Episodio" ni "hace"
-            title = lines.find(line => !line.includes("Episodio") && !line.match(/hace\s+\d+/i)) || lines[0] || "";
-        }
+        // Extraer tiempo
+        const timeAgo = parseTimeAgo(text);
 
-        // Badge de episodio: "Episodio 7"
-        const episodeMatch = el.text().match(/Episodio\s+(\d+)/i);
-        const episode = episodeMatch ? parseInt(episodeMatch[1], 10) : null;
-        const episodeText = episodeMatch ? `Episodio ${episodeMatch[1]}` : null;
+        // Extraer y limpiar título
+        const title = cleanTitle(text);
 
-        // Tiempo: "hace 7 minutos", "hace 1 día"
-        const timeMatch = el.text().match(/hace\s+(\d+\s+(?:minuto|hora|día|semana|mes)[s]?)/i);
-        const timeAgo = timeMatch ? `hace ${timeMatch[1]}` : null;
-
-        // URL del anime o episodio
+        // URL
         const link = el.is("a") ? el : el.find("a").first();
-        let url = resolveAbsoluteUrl(link.attr("href"));
+        const url = resolveAbsoluteUrl(link.attr("href"));
 
-        // Si la URL es de un episodio, intentar obtener la URL del anime
-        if (url && (url.includes("/ver/") || url.includes("/episodio/"))) {
-            // La URL del episodio sirve para getEpisodeLinks
-            // Pero para getAnimeInfo necesitamos la URL del anime
-            // Dejamos la URL del episodio, la app puede buscar el anime por título
-        }
-
-        // Solo agregar si tenemos título
-        if (title && title.length > 1) {
-            // Limpiar título (quitar líneas extras)
-            title = title.split("\n")[0].trim();
-
+        // Solo agregar si tenemos los datos esenciales
+        if (title && episode && timeAgo && url) {
             episodes.push({
                 title,
                 episode,
@@ -165,7 +131,7 @@ async function getLatestEpisodes() {
         }
     });
 
-    // Eliminar duplicados por título
+    // Eliminar duplicados por título + episodio
     const unique = [];
     const seen = new Set();
     for (const ep of episodes) {
@@ -175,6 +141,21 @@ async function getLatestEpisodes() {
             unique.push(ep);
         }
     }
+
+    // Ordenar por tiempo (más reciente primero)
+    // Los que dicen "minutos" van primero, luego "horas", luego "días"
+    const timeOrder = { "minuto": 1, "hora": 2, "día": 3, "semana": 4, "mes": 5 };
+    unique.sort((a, b) => {
+        const aUnit = a.timeAgo.match(/(minuto|hora|día|semana|mes)/i)?.[1] || "";
+        const bUnit = b.timeAgo.match(/(minuto|hora|día|semana|mes)/i)?.[1] || "";
+        const aNum = parseInt(a.timeAgo.match(/\d+/)?.[0] || "1");
+        const bNum = parseInt(b.timeAgo.match(/\d+/)?.[0] || "1");
+        
+        const aOrder = (timeOrder[aUnit] || 99) * 100 + aNum;
+        const bOrder = (timeOrder[bUnit] || 99) * 100 + bNum;
+        
+        return aOrder - bOrder;
+    });
 
     return {
         success: true,
