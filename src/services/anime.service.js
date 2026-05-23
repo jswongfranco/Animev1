@@ -6,6 +6,7 @@ const animeflvService = require("./animeflv.service");
 const hentailaService = require("./hentaila.service");
 const tioanimeService = require("./tioanime.service");
 const monoschinosService = require("./monoschinos.service");
+const latestService = require("./latest.service");  // ← LÍNEA NUEVA
 
 const DEFAULT_ANIME_DOMAIN = process.env.DEFAULT_ANIME_DOMAIN || "animeav1.com";
 
@@ -179,8 +180,18 @@ async function getEpisodeLinks(urlCandidate, includeMega, excludeServers) {
   };
 }
 
+// ← FUNCIÓN NUEVA: Obtener episodios recientes
+async function getLatestEpisodes() {
+  const result = await latestService.getLatestEpisodes();
+  return {
+    ...result,
+    source: result.source || "animeav1",
+  };
+}
+
 module.exports = {
   searchAnime,
   getAnimeInfo,
   getEpisodeLinks,
+  getLatestEpisodes,  // ← AGREGADO AQUÍ
 };

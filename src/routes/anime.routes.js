@@ -2,7 +2,7 @@ const express = require("express");
 const { requireApiKey } = require("../middlewares/auth");
 const { dailyRateLimit } = require("../middlewares/rate-limit");
 const animeService = require("../services/anime.service");
-const downloadService = require("../services/download.service");
+const downloadService = require("./services/download.service");
 const { ApiError } = require("../utils/api-error");
 
 const router = express.Router();
@@ -47,6 +47,15 @@ router.get(
     }
 
     const response = await animeService.getEpisodeLinks(req.query.url, req.query.includeMega, req.query.excludeServers);
+    res.status(200).json(response);
+  })
+);
+
+// ← RUTA NUEVA: Episodios recientes
+router.get(
+  "/latest",
+  asyncHandler(async (req, res) => {
+    const response = await animeService.getLatestEpisodes();
     res.status(200).json(response);
   })
 );
