@@ -46,43 +46,36 @@ async function getFeaturedAnime() {
     const $ = cheerio.load(html);
     const featured = [];
 
-    // ESTRATEGIA: Buscar específicamente los articles que tienen imagen de banner de pandrama
-    // El carrusel real usa: https://cdn.pandrama.online/banner/xxx.webp
-    // Los otros usan: https://cdn.animeav1.com/backdrops/xxx.jpg o https://cdn.animemovil2.com/media/portadas/xxx.webp
+    // ESTRATEGIA: Buscar todos los <article> y verificar si tienen imagen de pandrama
+    // Usando cheerio, iteramos todos los articles y verificamos manualmente
     
-    $("article").each((_, element) => {
-        const el = $(element);
+    const allArticles = $("article");
+    
+    for (let i = 0; i < allArticles.length; i++) {
+        const el = $(allArticles[i]);
         
-        // Buscar TODAS las imágenes dentro del article
-        let hasPandramaBanner = false;
-        let bannerUrl = null;
+        // Obtener el HTML completo del article para debug
+        const articleHtml = el.html() || "";
         
-        el.find("img").each((_, img) => {
-            const src = $(img).attr("src") || "";
-            // El carrusel real usa cdn.pandrama.online/banner/
-            if (src.includes("pandrama.online") && src.includes("banner")) {
-                hasPandramaBanner = true;
-                bannerUrl = src;
-            }
-        });
+        // Verificar si contiene "pandrama.online" en cualquier parte del HTML
+        const hasPandrama = articleHtml.includes("pandrama.online");
         
-        // Si no tiene banner de pandrama, no es del carrusel principal
-        if (!hasPandramaBanner) {
-            return;
+        // Si no tiene pandrama, skip
+        if (!hasPandrama) {
+            continue;
         }
         
-        // Verificar que NO sea un episodio reciente (no debe tener "Episodio X" ni tiempo)
+        // Verificar que NO sea episodio reciente
         const text = el.text();
-        if (text.match(/Episodio\s+\d+/)) return;
-        if (text.match(/hace\s+\d+\s+(minuto|hora|día)/)) return;
+        if (text.match(/Episodio\s+\d+/)) continue;
+        if (text.match(/hace\s+\d+\s+(minuto|hora|día)/)) continue;
 
         // Título
         const title = el.find("h1").text().trim();
+        if (!title) continue;
 
-        // Info: TV Anime • 2026 • En emisión
-        const infoContainer = el.find("header .flex.flex-wrap.items-center.gap-2.text-sm");
-        const infoText = infoContainer.text();
-        
+        // Info
+        const infoText = el.find("header .flex.flex-wrap.items-center.gap-2.text-sm").text();
         let type = "TV Anime";
         let year = null;
         let status = "En emisión";
@@ -96,9 +89,9 @@ async function getFeaturedAnime() {
         if (infoText.includes("En emisión")) status = "En emisión";
         else if (infoText.includes("Finalizado")) status = "Finalizado";
 
-        // Géneros - buscar links con genero= DENTRO del header del article
+        // Géneros
         const genres = [];
-        el.find("header a").each((_, genreEl) => {
+        el.find("a").each((_, genreEl) => {
             const href = $(genreEl).attr("href") || "";
             if (href.includes("genero=")) {
                 const genreText = $(genreEl).text().trim();
@@ -111,21 +104,24 @@ async function getFeaturedAnime() {
         // Sinopsis
         const synopsis = el.find(".entry p").text().trim();
 
-        // URL del anime - buscar el link que dice "Ver Anime"
+        // URL - buscar link con "Ver Anime"
         let url = null;
         el.find("a").each((_, linkEl) => {
-            const linkText = $(linkEl).text().trim();
-            if (linkText.includes("Ver Anime")) {
-                let href = $(linkEl).attr("href");
-                if (href) {
-                    if (href.startsWith("../")) href = href.replace("../", "/");
-                    else if (href.startsWith("./")) href = href.replace("./", "/");
-                    url = resolveAbsoluteUrl(href);
-                }
+            if ($(linkEl).text().includes("Ver Anime")) {
+                let href = $(linkEl).attr("href") || "";
+                if (href.startsWith("../")) href = href.replace("../", "/");
+                else if (href.startsWith("./")) href = href.replace("./", "/");
+                url = resolveAbsoluteUrl(href);
             }
         });
 
-        // Solo agregar si tenemos título y URL válida
+        // Banner URL - extraer de pandrama
+        let backdrop = null;
+        const pandramaMatch = articleHtml.match(/https:\/\/cdn\.pandrama\.online\/banner\/[^"'\s]+/);
+        if (pandramaMatch) {
+            backdrop = pandramaMatch[0];
+        }
+
         if (title && url) {
             featured.push({
                 title,
@@ -135,11 +131,11 @@ async function getFeaturedAnime() {
                 genres,
                 synopsis,
                 image: null,
-                backdrop: bannerUrl,
+                backdrop,
                 url,
             });
         }
-    });
+    }
 
     return {
         success: true,
