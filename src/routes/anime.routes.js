@@ -60,6 +60,15 @@ router.get(
   })
 );
 
+// ← RUTA NUEVA: CARRUSEL
+router.get(
+  "/featured",
+  asyncHandler(async (req, res) => {
+    const response = await animeService.getFeaturedAnime();
+    res.status(200).json(response);
+  })
+);
+
 router.post(
   "/download",
   asyncHandler(async (req, res) => {

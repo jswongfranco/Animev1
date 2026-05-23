@@ -7,6 +7,7 @@ const hentailaService = require("./hentaila.service");
 const tioanimeService = require("./tioanime.service");
 const monoschinosService = require("./monoschinos.service");
 const latestService = require("./latest.service");  // ← LÍNEA NUEVA
+const featuredService = require("./featured.service");    // ← LÍNEA NUEVA
 
 const DEFAULT_ANIME_DOMAIN = process.env.DEFAULT_ANIME_DOMAIN || "animeav1.com";
 
@@ -189,9 +190,19 @@ async function getLatestEpisodes() {
   };
 }
 
+// ← FUNCIÓN NUEVA: Obtener Carrusel
+async function getFeaturedAnime() {
+    const result = await featuredService.getFeaturedAnime();
+    return {
+        ...result,
+        source: result.source || "animeav1",
+    };
+}
+
 module.exports = {
   searchAnime,
   getAnimeInfo,
   getEpisodeLinks,
   getLatestEpisodes,  // ← AGREGADO AQUÍ
+  getFeaturedAnime,   // ← AGREGADO AQUÍ PARA CARRUSEL
 };
