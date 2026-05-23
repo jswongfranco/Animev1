@@ -41,29 +41,52 @@ function resolveAbsoluteUrl(urlCandidate, domain = DEFAULT_DOMAIN) {
     }
 }
 
+// Función para verificar si un article pertenece al carrusel
+function isCarouselArticle($, el) {
+    const text = el.text();
+    
+    // NO es del carrusel si tiene badge de episodio o tiempo
+    if (text.match(/Episodio\s+\d+/)) return false;
+    if (text.match(/hace\s+\d+\s+(minuto|hora|día)/)) return false;
+    
+    // ES del carrusel si tiene:
+    // 1. Un h1 (título grande)
+    const hasH1 = el.find("h1").length > 0;
+    
+    // 2. Un link "Ver Anime"
+    const hasVerAnime = text.includes("Ver Anime");
+    
+    // 3. Una imagen con src que contiene "banner" o "backdrop" o "pandrama"
+    let hasBannerImage = false;
+    el.find("img").each((_, img) => {
+        const src = $(img).attr("src") || "";
+        if (src.includes("banner") || src.includes("backdrop") || src.includes("pandrama")) {
+            hasBannerImage = true;
+        }
+    });
+    
+    // 4. Tiene géneros (links con genero=)
+    const hasGenres = el.find('a[href*="genero="]').length > 0;
+    
+    // 5. Tiene sinopsis en .entry
+    const hasSynopsis = el.find(".entry").length > 0;
+    
+    // Debe tener h1 + Ver Anime + (banner o géneros o sinopsis)
+    return hasH1 && hasVerAnime && (hasBannerImage || hasGenres || hasSynopsis);
+}
+
 async function getFeaturedAnime() {
     const html = await fetchHtml(BASE_URL);
     const $ = cheerio.load(html);
     const featured = [];
 
-    // Buscar TODOS los articles de la página y filtrar solo los del carrusel
-    // Los del carrusel se distinguen porque tienen:
-    // - h1 con título
-    // - img con src que contiene "cdn.pandrama.online/banner/" (backdrop)
-    // - NO tienen "Episodio X" ni tiempo "hace X minutos"
-    
+    // Buscar TODOS los articles y filtrar solo los del carrusel
     $("article").each((_, element) => {
         const el = $(element);
         
-        // Verificar que sea un article del carrusel (no de episodios recientes ni animes agregados)
-        const hasEpisodeBadge = el.text().match(/Episodio\s+\d+/);
-        const hasTimeAgo = el.text().match(/hace\s+\d+\s+(minuto|hora|día)/);
-        const hasBackdrop = el.find('img[src*="pandrama.online/banner"]').length > 0;
-        const hasH1 = el.find("h1").length > 0;
-        
-        // Solo procesar si tiene backdrop de pandrama (carrusel) y no es episodio reciente
-        if (!hasBackdrop || !hasH1 || hasEpisodeBadge || hasTimeAgo) {
-            return; // Skip this article
+        // Verificar si es un article del carrusel
+        if (!isCarouselArticle($, el)) {
+            return; // Skip
         }
 
         // Título
@@ -89,8 +112,7 @@ async function getFeaturedAnime() {
         if (infoText.includes("En emisión")) status = "En emisión";
         else if (infoText.includes("Finalizado")) status = "Finalizado";
 
-        // Géneros - en el carrusel están en links dentro del header
-        // Estructura: <a class="btn btn-xs btn-line-o rounded-full" href="../directorio/anime?genero=1">Acción</a>
+        // Géneros - buscar todos los links con genero= dentro del article
         const genres = [];
         el.find('a[href*="genero="]').each((_, genreEl) => {
             const genreText = $(genreEl).text().trim();
@@ -103,7 +125,10 @@ async function getFeaturedAnime() {
         const synopsis = el.find(".entry p").text().trim();
 
         // URL del anime - el link "Ver Anime"
-        const link = el.find('a:contains("Ver Anime")').first();
+        const link = el.find('a').filter(function() {
+            return $(this).text().includes("Ver Anime");
+        }).first();
+        
         let url = link.attr("href");
         
         // Limpiar la URL
@@ -116,12 +141,18 @@ async function getFeaturedAnime() {
             url = resolveAbsoluteUrl(url);
         }
 
-        // Imagen backdrop (banner grande de pandrama)
-        const backdropImg = el.find('img[src*="pandrama.online/banner"]').first();
-        const backdrop = backdropImg.attr("src");
+        // Imagen backdrop - buscar en todas las imgs del article
+        let backdrop = null;
+        el.find("img").each((_, img) => {
+            const src = $(img).attr("src") || "";
+            const alt = $(img).attr("alt") || "";
+            if ((src.includes("banner") || src.includes("backdrop") || src.includes("pandrama")) && !backdrop) {
+                backdrop = src;
+            }
+        });
 
-        // Solo agregar si tenemos título, URL válida y backdrop
-        if (title && url && backdrop) {
+        // Solo agregar si tenemos título y URL válida
+        if (title && url) {
             featured.push({
                 title,
                 type,
