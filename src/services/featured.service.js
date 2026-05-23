@@ -46,21 +46,19 @@ async function getFeaturedAnime() {
     const $ = cheerio.load(html);
     const featured = [];
 
-    // Buscar el carrusel: .dark > .flex > article
-    const carousel = $(".dark.overflow-hidden.rounded-xl > .flex.transform-gpu.gap-7");
-    
-    if (carousel.length === 0) {
-        // Fallback: buscar cualquier article dentro de .dark
-        $(".dark article").each((_, element) => {
-            const el = $(element);
-            // Solo tomar los que tienen backdrop (imagen grande)
-            if (el.find('img[src*="banner"], img[src*="backdrop"]').length > 0) {
-                carousel.push(element);
-            }
-        });
+    // Buscar el carrusel: .dark.overflow-hidden.rounded-xl > .flex.transform-gpu.gap-7
+    let carouselContainer = $(".dark.overflow-hidden.rounded-xl > .flex.transform-gpu.gap-7");
+
+    // Si no encontramos con ese selector exacto, buscar alternativas
+    if (carouselContainer.length === 0) {
+        carouselContainer = $(".dark > .flex");
+    }
+    if (carouselContainer.length === 0) {
+        carouselContainer = $('[class*="overflow-hidden"]').find('[class*="flex"]');
     }
 
-    const articles = carousel.find("> article");
+    // Obtener todos los articles dentro del carrusel
+    const articles = carouselContainer.find("> article");
 
     articles.each((_, element) => {
         const el = $(element);
@@ -69,9 +67,11 @@ async function getFeaturedAnime() {
         const title = el.find("h1").text().trim();
 
         // Info: TV Anime • 2026 • En emisión
-        const infoSpans = el.find("header .flex.flex-wrap.items-center.gap-2.text-sm span");
-        const type = $(infoSpans[0]).text().trim();
-        const year = $(infoSpans[2]).text().trim();
+        const infoText = el.find("header .flex.flex-wrap.items-center.gap-2.text-sm").text();
+        const typeMatch = infoText.match(/TV Anime|OVA|Película|Serie/i);
+        const type = typeMatch ? typeMatch[0] : "TV Anime";
+        const yearMatch = infoText.match(/\d{4}/);
+        const year = yearMatch ? yearMatch[0] : null;
         const status = el.find('span[class*="animate-pulse"]').text().trim() || "En emisión";
 
         // Géneros
