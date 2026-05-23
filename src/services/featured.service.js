@@ -46,80 +46,67 @@ async function getFeaturedAnime() {
     const $ = cheerio.load(html);
     const featured = [];
 
-    // Buscar el carrusel - basado en el HTML real que pasaste
-    // El carrusel está dentro de: <div class="dark overflow-hidden rounded-xl"><div class="flex transform-gpu gap-7">
-    // Cada slide es un <article class="relative grid w-full shrink-0 items-end gap-4 text-subs">
+    // Buscar TODOS los articles de la página y filtrar solo los del carrusel
+    // Los del carrusel se distinguen porque tienen:
+    // - h1 con título
+    // - img con src que contiene "cdn.pandrama.online/banner/" (backdrop)
+    // - NO tienen "Episodio X" ni tiempo "hace X minutos"
     
-    // Intentar múltiples selectores para encontrar el carrusel
-    let articles = $();
-    
-    // Selector 1: El contenedor exacto del HTML
-    const carouselWrapper = $(".dark.overflow-hidden.rounded-xl");
-    if (carouselWrapper.length > 0) {
-        const flexContainer = carouselWrapper.find("> .flex.transform-gpu.gap-7");
-        if (flexContainer.length > 0) {
-            articles = flexContainer.find("> article");
-        }
-    }
-    
-    // Selector 2: Si no funcionó, buscar articles que tengan backdrop/banner
-    if (articles.length === 0) {
-        $("article").each((_, element) => {
-            const el = $(element);
-            // Un article del carrusel tiene: h1, backdrop img, y link "Ver Anime"
-            if (el.find("h1").length > 0 && 
-                el.find('img[src*="banner"], img[src*="backdrop"]').length > 0 &&
-                el.find('a:contains("Ver Anime")').length > 0) {
-                articles = articles.add(el);
-            }
-        });
-    }
-    
-    // Selector 3: Buscar por la estructura específica del carrusel
-    if (articles.length === 0) {
-        // Buscar articles que tengan la clase específica del carrusel
-        articles = $("article.relative.grid.w-full.shrink-0");
-    }
-
-    articles.each((_, element) => {
+    $("article").each((_, element) => {
         const el = $(element);
+        
+        // Verificar que sea un article del carrusel (no de episodios recientes ni animes agregados)
+        const hasEpisodeBadge = el.text().match(/Episodio\s+\d+/);
+        const hasTimeAgo = el.text().match(/hace\s+\d+\s+(minuto|hora|día)/);
+        const hasBackdrop = el.find('img[src*="pandrama.online/banner"]').length > 0;
+        const hasH1 = el.find("h1").length > 0;
+        
+        // Solo procesar si tiene backdrop de pandrama (carrusel) y no es episodio reciente
+        if (!hasBackdrop || !hasH1 || hasEpisodeBadge || hasTimeAgo) {
+            return; // Skip this article
+        }
 
-        // Título - está en h1 dentro del header
+        // Título
         const title = el.find("h1").text().trim();
 
         // Info: TV Anime • 2026 • En emisión
         const infoContainer = el.find("header .flex.flex-wrap.items-center.gap-2.text-sm");
-        const infoSpans = infoContainer.find("span");
+        const infoText = infoContainer.text();
         
         let type = "TV Anime";
         let year = null;
         let status = "En emisión";
         
-        infoSpans.each((i, span) => {
-            const text = $(span).text().trim();
-            if (text.match(/TV Anime|OVA|Película|Serie|ONA|Special/i)) {
-                type = text;
-            } else if (text.match(/^\d{4}$/)) {
-                year = text;
-            } else if (text.includes("En emisión") || text.includes("Finalizado")) {
-                status = text;
+        // Extraer tipo
+        const typeMatch = infoText.match(/(TV Anime|OVA|Película|Serie|ONA|Special)/i);
+        if (typeMatch) type = typeMatch[1];
+        
+        // Extraer año
+        const yearMatch = infoText.match(/\b(19\d{2}|20\d{2})\b/);
+        if (yearMatch) year = yearMatch[1];
+        
+        // Extraer status
+        if (infoText.includes("En emisión")) status = "En emisión";
+        else if (infoText.includes("Finalizado")) status = "Finalizado";
+
+        // Géneros - en el carrusel están en links dentro del header
+        // Estructura: <a class="btn btn-xs btn-line-o rounded-full" href="../directorio/anime?genero=1">Acción</a>
+        const genres = [];
+        el.find('a[href*="genero="]').each((_, genreEl) => {
+            const genreText = $(genreEl).text().trim();
+            if (genreText && genreText.length > 0 && genreText.length < 30) {
+                genres.push(genreText);
             }
         });
 
-        // Géneros - están en links con href que contiene "genero="
-        const genres = [];
-        el.find("a[href*='genero=']").each((_, genreEl) => {
-            genres.push($(genreEl).text().trim());
-        });
-
-        // Sinopsis - está en .entry p
+        // Sinopsis
         const synopsis = el.find(".entry p").text().trim();
 
         // URL del anime - el link "Ver Anime"
         const link = el.find('a:contains("Ver Anime")').first();
         let url = link.attr("href");
         
-        // Limpiar la URL (quitar ../ y hacer absoluta)
+        // Limpiar la URL
         if (url) {
             if (url.startsWith("../")) {
                 url = url.replace("../", "/");
@@ -129,11 +116,11 @@ async function getFeaturedAnime() {
             url = resolveAbsoluteUrl(url);
         }
 
-        // Imagen backdrop (banner grande) - buscar img con src que contiene banner o backdrop
-        const backdropImg = el.find('img[src*="banner"], img[src*="backdrop"], img[src*="cdn.pandrama"]').first();
+        // Imagen backdrop (banner grande de pandrama)
+        const backdropImg = el.find('img[src*="pandrama.online/banner"]').first();
         const backdrop = backdropImg.attr("src");
 
-        // Solo agregar si tenemos título y URL válida
+        // Solo agregar si tenemos título, URL válida y backdrop
         if (title && url && backdrop) {
             featured.push({
                 title,
@@ -142,7 +129,7 @@ async function getFeaturedAnime() {
                 status,
                 genres,
                 synopsis,
-                image: null, // El carrusel solo tiene backdrop, no poster
+                image: null,
                 backdrop,
                 url,
             });
