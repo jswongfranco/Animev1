@@ -1,5 +1,6 @@
 // src/services/new.service.js
 const axios = require("axios");
+const cheerio = require("cheerio");
 const { URL } = require("node:url");
 const { ApiError } = require("../utils/api-error");
 
@@ -40,140 +41,123 @@ function resolveAbsoluteUrl(urlCandidate, domain = DEFAULT_DOMAIN) {
     }
 }
 
-function extractNewAnimeFromHtml(html) {
-    // Buscar todo el script de SvelteKit que contiene los datos
-    const scriptMatch = html.match(/__sveltekit_[a-z0-9]+\s*=\s*\{[\s\S]*?data\s*:\s*\[\s*null\s*,\s*\{\s*type\s*:\s*"data"[\s\S]*?\}\s*\]\s*\}/);
-    
-    if (!scriptMatch) {
-        console.log("No se encontró el script de SvelteKit");
-        return [];
-    }
-    
-    const scriptContent = scriptMatch[0];
-    
-    // Buscar latestMedia dentro del script
-    // El patrón es: latestMedia:[{...},{...}], uses:{}
-    const latestMediaMatch = scriptContent.match(/latestMedia\s*:\s*(\[[\s\S]*?\])\s*,\s*uses\s*:\s*\{\}/);
-    
-    if (latestMediaMatch) {
-        try {
-            let jsonStr = latestMediaMatch[1];
-            
-            // Limpiar el JSON: las keys no tienen comillas en el HTML de SvelteKit
-            jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-            
-            // Limpiar trailing commas
-            jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-            
-            const latestMedia = JSON.parse(jsonStr);
-            return latestMedia;
-        } catch (e) {
-            console.log("Error parseando latestMedia:", e.message);
-        }
-    }
-    
-    // Si no funciona, intentar buscar con un regex más permisivo
-    const altMatch = scriptContent.match(/latestMedia\s*:\s*(\[[\s\S]{500,20000}?\])\s*,\s*uses/);
-    if (altMatch) {
-        try {
-            let jsonStr = altMatch[1];
-            jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-            jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-            const latestMedia = JSON.parse(jsonStr);
-            return latestMedia;
-        } catch (e) {
-            console.log("Error parseando alt latestMedia:", e.message);
-        }
-    }
-    
-    return [];
-}
-
-function extractNewFromArticles(html) {
-    // Extraer directamente de los <article> de "Recientemente Agregados"
-    const newAnime = [];
-    
-    // Buscar la sección "Animes" - "Recientemente Agregados"
-    // Buscar desde "Animes" hasta el siguiente </section>
-    const sectionRegex = /<<h2[^>]*>Animes<<\/h2>[\s\S]*?<<p[^>]*>Recientemente Agregados<<\/p>[\s\S]*?<<\/section>/;
-    const sectionMatch = html.match(sectionRegex);
-    
-    if (!sectionMatch) {
-        console.log("No se encontró la sección Animes/Recientemente Agregados");
-        return [];
-    }
-    
-    const sectionHtml = sectionMatch[0];
-    
-    // Buscar cada artículo
-    const articleRegex = /<article[^>]*>[\s\S]*?<\/article>/g;
-    let match;
-    
-    while ((match = articleRegex.exec(sectionHtml)) !== null) {
-        const article = match[0];
-        
-        // Título (en el alt de la imagen: "Portada de Tiger & Bunny")
-        const titleMatch = article.match(/alt="Portada de ([^"]*)"/);
-        const title = titleMatch ? titleMatch[1] : null;
-        
-        // Imagen (portada/cover)
-        const imgMatch = article.match(/src="(https:\/\/cdn\.animeav1\.com\/covers\/[^"]*)"/);
-        const image = imgMatch ? imgMatch[1] : null;
-        
-        // URL
-        const urlMatch = article.match(/href="(\/media\/[^"]*)"/);
-        const url = urlMatch ? resolveAbsoluteUrl(urlMatch[1]) : null;
-        
-        // Tipo (TV Anime, Película, OVA, Especial)
-        const typeMatch = article.match(/<<div class="rounded[^>]*>(.*?)<<\/div>/);
-        const type = typeMatch ? typeMatch[1].trim() : "TV Anime";
-        
-        if (title && url) {
-            newAnime.push({
-                title,
-                image,
-                url,
-                type,
-                source: "animeav1"
-            });
-        }
-    }
-    
-    return newAnime;
-}
-
 async function getNewAnime() {
     const html = await fetchHtml(BASE_URL);
+    const $ = cheerio.load(html);
+    const newAnime = [];
+
+    // Buscar la sección "Animes" - "Recientemente Agregados"
+    // En el HTML está: <h2>Animes</h2> <p>Recientemente Agregados</p>
+    // Después viene un div con grid de artículos
     
-    // Intentar extraer del JSON de SvelteKit
-    let newAnime = extractNewAnimeFromHtml(html);
-    console.log("Desde JSON:", newAnime.length, "items");
-    
-    // Si falla, extraer de los artículos HTML directamente
-    if (!newAnime || newAnime.length === 0) {
-        newAnime = extractNewFromArticles(html);
-        console.log("Desde HTML:", newAnime.length, "items");
+    // Buscar todos los h2 que contengan "Animes"
+    $('h2').each((_, h2Element) => {
+        const h2 = $(h2Element);
+        const text = h2.text().trim();
+        
+        if (text === 'Animes') {
+            // El siguiente p debe tener "Recientemente Agregados"
+            const nextP = h2.next('p');
+            if (nextP.length && nextP.text().includes('Recientemente Agregados')) {
+                // El contenedor de artículos está después
+                const container = h2.parent().next('div') || h2.closest('header').next('div');
+                
+                if (container.length) {
+                    container.find('article').each((_, article) => {
+                        const el = $(article);
+                        
+                        // Imagen (portada)
+                        const img = el.find('img').first();
+                        const image = resolveAbsoluteUrl(img.attr('src') || img.attr('data-src'));
+                        
+                        // Título (en el alt: "Portada de Tiger & Bunny")
+                        const altText = img.attr('alt') || '';
+                        const titleMatch = altText.match(/Portada de (.*)/);
+                        const title = titleMatch ? titleMatch[1] : altText;
+                        
+                        // URL del anime
+                        const link = el.find('a').first();
+                        const url = resolveAbsoluteUrl(link.attr('href'));
+                        
+                        // Tipo (TV Anime, Película, OVA, Especial)
+                        const typeBadge = el.find('.rounded, [class*="rounded"]').first();
+                        const type = typeBadge.text().trim() || 'TV Anime';
+                        
+                        // Sinopsis (está en el hover/div oculto)
+                        const synopsisEl = el.find('.line-clamp-6, p').first();
+                        const synopsis = synopsisEl.text().trim() || null;
+                        
+                        if (title && url) {
+                            newAnime.push({
+                                title,
+                                image,
+                                url,
+                                type,
+                                synopsis,
+                                source: 'animeav1'
+                            });
+                        }
+                    });
+                }
+            }
+        }
+    });
+
+    // Si no encontramos con el método anterior, intentar buscar por sección
+    if (newAnime.length === 0) {
+        // Buscar por el texto "Recientemente Agregados" en cualquier lugar
+        $('p, span, h2, h3').each((_, element) => {
+            const el = $(element);
+            if (el.text().includes('Recientemente Agregados')) {
+                // Buscar el contenedor padre que tenga los artículos
+                const parent = el.closest('section, div');
+                if (parent.length) {
+                    parent.find('article').each((_, article) => {
+                        const art = $(article);
+                        
+                        const img = art.find('img').first();
+                        const image = resolveAbsoluteUrl(img.attr('src') || img.attr('data-src'));
+                        
+                        const altText = img.attr('alt') || '';
+                        const titleMatch = altText.match(/Portada de (.*)/);
+                        const title = titleMatch ? titleMatch[1] : altText;
+                        
+                        const link = art.find('a').first();
+                        const url = resolveAbsoluteUrl(link.attr('href'));
+                        
+                        const typeBadge = art.find('.rounded, [class*="rounded"]').first();
+                        const type = typeBadge.text().trim() || 'TV Anime';
+                        
+                        if (title && url && !newAnime.find(a => a.title === title)) {
+                            newAnime.push({
+                                title,
+                                image,
+                                url,
+                                type,
+                                source: 'animeav1'
+                            });
+                        }
+                    });
+                }
+            }
+        });
     }
 
-    // Normalizar
-    const normalized = newAnime.map(item => ({
-        id: item.id || null,
-        title: item.title,
-        slug: item.slug || null,
-        category: item.category?.name || item.type || "TV Anime",
-        year: item.year || (item.createdAt ? item.createdAt.split('-')[0] : null),
-        synopsis: item.synopsis || item.description || null,
-        image: item.image || (item.id ? `https://cdn.animeav1.com/covers/${item.id}.jpg` : null),
-        url: item.url || (item.slug ? `https://animeav1.com/media/${item.slug}` : null),
-        createdAt: item.createdAt || null,
-        source: "animeav1"
-    }));
+    // Eliminar duplicados
+    const unique = [];
+    const seen = new Set();
+    for (const anime of newAnime) {
+        if (!seen.has(anime.title)) {
+            seen.add(anime.title);
+            unique.push(anime);
+        }
+    }
 
     return {
         success: true,
-        data: normalized,
-        count: normalized.length,
-        source: "animeav1",
+        data: unique,
+        count: unique.length,
+        source: 'animeav1',
     };
 }
 
