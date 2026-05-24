@@ -69,6 +69,15 @@ router.get(
     })
 );
 
+//← RUTA NUEVA: Recientemente Agregados
+router.get(
+    "/new",
+    asyncHandler(async (req, res) => {
+        const response = await animeService.getNewAnime();
+        res.status(200).json(response);
+    })
+);
+
 router.post(
   "/download",
   asyncHandler(async (req, res) => {

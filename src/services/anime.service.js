@@ -200,10 +200,22 @@ async function getFeaturedAnime() {
     };
 }
 
+//← FUNCIÓN NUEVA: Obtener Recientemente Agregados
+const newService = require("./new.service");
+
+async function getNewAnime() {
+    const result = await newService.getNewAnime();
+    return {
+        ...result,
+        source: result.source || "animeav1",
+    };
+}
+
 module.exports = {
   searchAnime,
   getAnimeInfo,
   getEpisodeLinks,
   getLatestEpisodes,  // ← AGREGADO AQUÍ
   getFeaturedAnime,  // ← NUEVO
+  getNewAnime,  // ← NUEVO
 };
