@@ -41,47 +41,48 @@ function resolveAbsoluteUrl(urlCandidate, domain = DEFAULT_DOMAIN) {
 }
 
 function extractNewAnimeFromHtml(html) {
-    // El JSON está en el script de SvelteKit con este formato exacto:
-    // data: [null, {type:"data",data:{..., latestMedia:[...]}}]
+    // Buscar todo el script de SvelteKit que contiene los datos
+    const scriptMatch = html.match(/__sveltekit_[a-z0-9]+\s*=\s*\{[\s\S]*?data\s*:\s*\[\s*null\s*,\s*\{\s*type\s*:\s*"data"[\s\S]*?\}\s*\]\s*\}/);
     
-    // Buscar el bloque completo que contiene latestMedia (igual que featured pero buscando latestMedia)
-    const fullDataMatch = html.match(/data\s*:\s*\[\s*null\s*,\s*\{\s*type\s*:\s*"data"\s*,\s*data\s*:\s*\{([\s\S]*?)\}\s*,\s*uses\s*:\s*\{\s*\}\s*\}\s*\]/);
+    if (!scriptMatch) {
+        console.log("No se encontró el script de SvelteKit");
+        return [];
+    }
     
-    if (fullDataMatch) {
-        const dataBlock = fullDataMatch[1];
-        
-        // Extraer solo el array latestMedia (está DESPUÉS de latestEpisodes)
-        const latestMediaMatch = dataBlock.match(/latestMedia\s*:\s*(\[[\s\S]*?\])\s*,\s*uses/);
-        
-        if (latestMediaMatch) {
-            try {
-                let jsonStr = latestMediaMatch[1];
-                
-                // Limpiar el JSON: las keys no tienen comillas en el HTML de SvelteKit
-                jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-                
-                // Limpiar trailing commas
-                jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-                
-                const latestMedia = JSON.parse(jsonStr);
-                return latestMedia;
-            } catch (e) {
-                console.log("Error parseando latestMedia:", e.message);
-            }
+    const scriptContent = scriptMatch[0];
+    
+    // Buscar latestMedia dentro del script
+    // El patrón es: latestMedia:[{...},{...}], uses:{}
+    const latestMediaMatch = scriptContent.match(/latestMedia\s*:\s*(\[[\s\S]*?\])\s*,\s*uses\s*:\s*\{\}/);
+    
+    if (latestMediaMatch) {
+        try {
+            let jsonStr = latestMediaMatch[1];
+            
+            // Limpiar el JSON: las keys no tienen comillas en el HTML de SvelteKit
+            jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+            
+            // Limpiar trailing commas
+            jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+            
+            const latestMedia = JSON.parse(jsonStr);
+            return latestMedia;
+        } catch (e) {
+            console.log("Error parseando latestMedia:", e.message);
         }
     }
     
-    // Fallback: buscar con regex más simple (igual que featured)
-    const simpleMatch = html.match(/latestMedia\s*:\s*(\[[\s\S]{100,10000}?\])\s*,\s*uses/);
-    if (simpleMatch) {
+    // Si no funciona, intentar buscar con un regex más permisivo
+    const altMatch = scriptContent.match(/latestMedia\s*:\s*(\[[\s\S]{500,20000}?\])\s*,\s*uses/);
+    if (altMatch) {
         try {
-            let jsonStr = simpleMatch[1];
+            let jsonStr = altMatch[1];
             jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
             jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
             const latestMedia = JSON.parse(jsonStr);
             return latestMedia;
         } catch (e) {
-            console.log("Error parseando simple latestMedia:", e.message);
+            console.log("Error parseando alt latestMedia:", e.message);
         }
     }
     
@@ -93,16 +94,16 @@ function extractNewFromArticles(html) {
     const newAnime = [];
     
     // Buscar la sección "Animes" - "Recientemente Agregados"
-    // El HTML tiene: <h2>Animes</h2> <p>Recientemente Agregados</p>
-    const sectionMatch = html.match(/<<h2[^>]*>Animes<<\/h2>[\s\S]*?<<p[^>]*>Recientemente Agregados<<\/p>[\s\S]*?<<div class="grid grid-cols-2[\s\S]*?<<\/section>/);
+    // Buscar desde "Animes" hasta el siguiente </section>
+    const sectionRegex = /<<h2[^>]*>Animes<<\/h2>[\s\S]*?<<p[^>]*>Recientemente Agregados<<\/p>[\s\S]*?<<\/section>/;
+    const sectionMatch = html.match(sectionRegex);
     
     if (!sectionMatch) {
-        // Intentar otro patrón
-        const altMatch = html.match(/Recientemente Agregados[\s\S]*?<<div class="grid grid-cols-2[\s\S]*?<<\/section>/);
-        if (!altMatch) return [];
+        console.log("No se encontró la sección Animes/Recientemente Agregados");
+        return [];
     }
     
-    const sectionHtml = sectionMatch ? sectionMatch[0] : altMatch[0];
+    const sectionHtml = sectionMatch[0];
     
     // Buscar cada artículo
     const articleRegex = /<article[^>]*>[\s\S]*?<\/article>/g;
@@ -144,12 +145,14 @@ function extractNewFromArticles(html) {
 async function getNewAnime() {
     const html = await fetchHtml(BASE_URL);
     
-    // Intentar extraer del JSON de SvelteKit (igual que featured)
+    // Intentar extraer del JSON de SvelteKit
     let newAnime = extractNewAnimeFromHtml(html);
+    console.log("Desde JSON:", newAnime.length, "items");
     
     // Si falla, extraer de los artículos HTML directamente
     if (!newAnime || newAnime.length === 0) {
         newAnime = extractNewFromArticles(html);
+        console.log("Desde HTML:", newAnime.length, "items");
     }
 
     // Normalizar
