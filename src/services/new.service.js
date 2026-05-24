@@ -20,40 +20,23 @@ function extractNewFromArticles(html) {
     const $ = cheerio.load(html);
     const newAnime = [];
 
-    // Buscar el heading "Recientemente Agregados"
-    let targetSection = null;
-    
-    $("h2, h3, .section-title, [class*='title']").each((_, el) => {
-        const text = $(el).text().trim().toLowerCase();
-        
-        if (text.includes("recientemente agregados") || text.includes("nuevos animes")) {
-            targetSection = $(el).closest("section, div[class*='section'], .container, [class*='anime']");
-            return false;
-        }
-    });
-
-    if (!targetSection || targetSection.length === 0) {
-        console.log("[new.service] No se encontró la sección 'Recientemente Agregados'");
-        return [];
-    }
-
-    const articles = targetSection.find("article, .anime-card, [class*='card'], .media-item, a[href*='/media/']");
+    // Buscar TODOS los articles/cards de la página (como antes)
+    const articles = $("article, .anime-card, [class*='card'], .media-item");
 
     articles.each((_, article) => {
         const $article = $(article);
         
-        const titleEl = $article.find("h3, h4, .title, [class*='title'], p, span").first();
+        const titleEl = $article.find("h3, h4, .title, [class*='title'], a").first();
         let title = titleEl.text().trim();
         
-        if (!title) {
-            const imgAlt = $article.find("img").attr("alt");
-            title = imgAlt ? imgAlt.trim() : null;
-        }
-
         const linkEl = $article.find("a").first();
         const href = linkEl.attr("href") || "";
         
+        // IGNORAR géneros
         if (href.includes("genre=")) return;
+        
+        // IGNORAR episodios (/media/slug/123)
+        if (href.match(/\/media\/[^/]+\/\d+$/)) return;
         
         const url = href.startsWith("http") ? href : `${BASE_URL}${href.startsWith("/") ? "" : "/"}${href}`;
         
@@ -64,20 +47,31 @@ function extractNewFromArticles(html) {
             image = `${BASE_URL}${image.startsWith("/") ? "" : "/"}${image}`;
         }
 
+        // SOLO aceptar covers de anime (no thumbnails de episodios ni backdrops de géneros)
+        if (!image || !image.includes("/covers/")) return;
+        
+        // Extraer ID del cover
+        const idMatch = image.match(/\/covers\/(\d+)\.jpg/);
+        const id = idMatch ? idMatch[1] : null;
+        
+        if (!id) return;
+
         const slugMatch = url.match(/\/media\/([^/?#]+)/);
         const slug = slugMatch ? slugMatch[1] : null;
 
-        const idMatch = image ? image.match(/\/covers\/(\d+)\.jpg/) : null;
-        const id = idMatch ? idMatch[1] : null;
+        if (!title) {
+            const imgAlt = imgEl.attr("alt");
+            title = imgAlt ? imgAlt.trim() : null;
+        }
 
         const metaText = $article.text();
-        const categoryMatch = metaText.match(/(TV\s*Anime|OVA|ONA|Película|Movie|Especial|Special)/i);
-        const category = categoryMatch ? categoryMatch[1].replace(/\s+/g, " ").trim() : "TV Anime";
-
         const yearMatch = metaText.match(/\b(19\d{2}|20\d{2})\b/);
         const year = yearMatch ? yearMatch[1] : null;
 
-        if (title && slug && image) {
+        const categoryMatch = metaText.match(/(TV|OVA|ONA|Película|Movie|Especial|Special)\s*(?:Anime)?/i);
+        const category = categoryMatch ? categoryMatch[1] : "TV Anime";
+
+        if (title && slug) {
             newAnime.push({
                 title,
                 slug,
@@ -100,6 +94,7 @@ async function getNewAnime() {
     const html = await fetchHtml(BASE_URL);
     const newAnime = extractNewFromArticles(html);
 
+    // Eliminar duplicados por slug
     const seen = new Set();
     const unique = newAnime.filter(item => {
         if (!item.slug || seen.has(item.slug)) return false;
