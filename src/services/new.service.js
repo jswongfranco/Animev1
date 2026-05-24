@@ -41,27 +41,37 @@ function resolveAbsoluteUrl(urlCandidate, domain = DEFAULT_DOMAIN) {
 }
 
 function extractNewAnimeFromHtml(html) {
-    // Buscar latestMedia en el JSON de SvelteKit
-    const fullDataMatch = html.match(/data\s*:\s*\[\s*null\s*,\s*\{\s*type\s*:\s*"data"\s*,\s*data\s*:\s*\{[\s\S]*?latestMedia\s*:\s*(\[[\s\S]*?\])\s*,\s*uses\s*:\s*\{\s*\}\s*\}\s*\]/);
+    // El JSON está en el script de SvelteKit con este formato exacto:
+    // data: [null, {type:"data",data:{..., latestMedia:[...]}}]
+    
+    // Buscar el bloque completo que contiene latestMedia (igual que featured pero buscando latestMedia)
+    const fullDataMatch = html.match(/data\s*:\s*\[\s*null\s*,\s*\{\s*type\s*:\s*"data"\s*,\s*data\s*:\s*\{([\s\S]*?)\}\s*,\s*uses\s*:\s*\{\s*\}\s*\}\s*\]/);
     
     if (fullDataMatch) {
-        try {
-            let jsonStr = fullDataMatch[1];
-            
-            // Limpiar el JSON: las keys no tienen comillas en el HTML de SvelteKit
-            jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-            
-            // Limpiar trailing commas
-            jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-            
-            const latestMedia = JSON.parse(jsonStr);
-            return latestMedia;
-        } catch (e) {
-            console.log("Error parseando latestMedia:", e.message);
+        const dataBlock = fullDataMatch[1];
+        
+        // Extraer solo el array latestMedia (está DESPUÉS de latestEpisodes)
+        const latestMediaMatch = dataBlock.match(/latestMedia\s*:\s*(\[[\s\S]*?\])\s*,\s*uses/);
+        
+        if (latestMediaMatch) {
+            try {
+                let jsonStr = latestMediaMatch[1];
+                
+                // Limpiar el JSON: las keys no tienen comillas en el HTML de SvelteKit
+                jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+                
+                // Limpiar trailing commas
+                jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+                
+                const latestMedia = JSON.parse(jsonStr);
+                return latestMedia;
+            } catch (e) {
+                console.log("Error parseando latestMedia:", e.message);
+            }
         }
     }
     
-    // Fallback: buscar con regex más simple
+    // Fallback: buscar con regex más simple (igual que featured)
     const simpleMatch = html.match(/latestMedia\s*:\s*(\[[\s\S]{100,10000}?\])\s*,\s*uses/);
     if (simpleMatch) {
         try {
@@ -79,15 +89,20 @@ function extractNewAnimeFromHtml(html) {
 }
 
 function extractNewFromArticles(html) {
-    // Extraer de los <article> de "Recientemente Agregados"
+    // Extraer directamente de los <article> de "Recientemente Agregados"
     const newAnime = [];
     
     // Buscar la sección "Animes" - "Recientemente Agregados"
-    const sectionMatch = html.match(/<<h2[^>]*>Animes<<\/h2>[\s\S]*?<<div class="grid grid-cols-2[\s\S]*?<<\/section>/);
+    // El HTML tiene: <h2>Animes</h2> <p>Recientemente Agregados</p>
+    const sectionMatch = html.match(/<<h2[^>]*>Animes<<\/h2>[\s\S]*?<<p[^>]*>Recientemente Agregados<<\/p>[\s\S]*?<<div class="grid grid-cols-2[\s\S]*?<<\/section>/);
     
-    if (!sectionMatch) return [];
+    if (!sectionMatch) {
+        // Intentar otro patrón
+        const altMatch = html.match(/Recientemente Agregados[\s\S]*?<<div class="grid grid-cols-2[\s\S]*?<<\/section>/);
+        if (!altMatch) return [];
+    }
     
-    const sectionHtml = sectionMatch[0];
+    const sectionHtml = sectionMatch ? sectionMatch[0] : altMatch[0];
     
     // Buscar cada artículo
     const articleRegex = /<article[^>]*>[\s\S]*?<\/article>/g;
@@ -96,7 +111,7 @@ function extractNewFromArticles(html) {
     while ((match = articleRegex.exec(sectionHtml)) !== null) {
         const article = match[0];
         
-        // Título
+        // Título (en el alt de la imagen: "Portada de Tiger & Bunny")
         const titleMatch = article.match(/alt="Portada de ([^"]*)"/);
         const title = titleMatch ? titleMatch[1] : null;
         
@@ -129,7 +144,7 @@ function extractNewFromArticles(html) {
 async function getNewAnime() {
     const html = await fetchHtml(BASE_URL);
     
-    // Intentar extraer del JSON de SvelteKit
+    // Intentar extraer del JSON de SvelteKit (igual que featured)
     let newAnime = extractNewAnimeFromHtml(html);
     
     // Si falla, extraer de los artículos HTML directamente
