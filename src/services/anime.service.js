@@ -189,9 +189,21 @@ async function getLatestEpisodes() {
   };
 }
 
+//← FUNCIÓN NUEVA: Obtener carrusel
+const featuredService = require("./featured.service");
+
+async function getFeaturedAnime() {
+    const result = await featuredService.getFeaturedAnime();
+    return {
+        ...result,
+        source: result.source || "animeav1",
+    };
+}
+
 module.exports = {
   searchAnime,
   getAnimeInfo,
   getEpisodeLinks,
   getLatestEpisodes,  // ← AGREGADO AQUÍ
+  getFeaturedAnime,  // ← NUEVO
 };
