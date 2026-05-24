@@ -41,54 +41,115 @@ function resolveAbsoluteUrl(urlCandidate, domain = DEFAULT_DOMAIN) {
 }
 
 function extractFeaturedFromHtml(html) {
-    // Buscar el JSON de SvelteKit que contiene "featured"
-    const featuredMatch = html.match(/"featured":\s*(\[.*?\]),\s*"latestEpisodes"/s);
+    // El JSON está en un <script> de SvelteKit con formato: "featured":[{...}]
+    // Buscamos el patrón exacto del HTML que me pasaste
     
-    if (!featuredMatch) {
-        // Intentar otro patrón
-        const altMatch = html.match(/featured:\s*(\[.*?\]),\s*latestEpisodes/s);
-        if (!altMatch) {
-            return [];
+    // Patrón 1: Buscar "featured" seguido de array en el script de SvelteKit
+    const pattern1 = /"featured"\s*:\s*(\[\s*\{[\s\S]*?\}\s*\])/;
+    const match1 = html.match(pattern1);
+    
+    if (match1) {
+        try {
+            const jsonStr = match1[1];
+            // Limpiar trailing commas que pueden hacer fallar el parseo
+            const cleanJson = jsonStr
+                .replace(/,\s*([}\]])/g, '$1');
+            
+            const featured = JSON.parse(cleanJson);
+            return featured;
+        } catch (e) {
+            console.log("Error parseando featured pattern1:", e.message);
         }
     }
-
-    try {
-        const jsonStr = featuredMatch[1];
-        // Limpiar el JSON para que sea válido
-        const cleanJson = jsonStr
-            .replace(/,\s*}/g, '}')  // Eliminar trailing commas en objetos
-            .replace(/,\s*]/g, ']'); // Eliminar trailing commas en arrays
-        
-        const featured = JSON.parse(cleanJson);
-        return featured;
-    } catch (error) {
-        // Si falla el parseo, intentar extraer con regex más simple
-        return extractFeaturedWithRegex(html);
+    
+    // Patrón 2: Buscar en el objeto data de SvelteKit
+    const pattern2 = /featured\s*:\s*(\[[\s\S]*?\]),\s*latestEpisodes/;
+    const match2 = html.match(pattern2);
+    
+    if (match2) {
+        try {
+            const jsonStr = match2[1];
+            const cleanJson = jsonStr.replace(/,\s*([}\]])/g, '$1');
+            const featured = JSON.parse(cleanJson);
+            return featured;
+        } catch (e) {
+            console.log("Error parseando featured pattern2:", e.message);
+        }
     }
+    
+    // Patrón 3: Buscar todo el objeto data que contiene featured
+    const pattern3 = /data\s*:\s*\[\s*null\s*,\s*\{[\s\S]*?featured\s*:\s*(\[[\s\S]*?\])/;
+    const match3 = html.match(pattern3);
+    
+    if (match3) {
+        try {
+            const jsonStr = match3[1];
+            const cleanJson = jsonStr.replace(/,\s*([}\]])/g, '$1');
+            const featured = JSON.parse(cleanJson);
+            return featured;
+        } catch (e) {
+            console.log("Error parseando featured pattern3:", e.message);
+        }
+    }
+    
+    return [];
 }
 
-function extractFeaturedWithRegex(html) {
+function extractFeaturedFromArticles(html) {
+    // Fallback: extraer de los <article> del carrusel directamente
     const featured = [];
     
-    // Buscar cada artículo del carrusel
-    const articleRegex = /<article[^>]*>[\s\S]*?<h1[^>]*>(.*?)<<\/h1>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*>[\s\S]*?<a[^>]*href="([^"]*)"[^>]*>Ver Anime<<\/a>/gi;
+    // Buscar artículos del carrusel principal
+    const articleRegex = /<article[^>]*class="[^"]*relative[^"]*"[^>]*>[\s\S]*?<\/article>/gi;
+    let articleMatch;
     
-    let match;
-    while ((match = articleRegex.exec(html)) !== null) {
-        const title = match[1].replace(/<<[^>]*>/g, '').trim();
-        const image = match[2];
-        const url = resolveAbsoluteUrl(match[3]);
+    while ((articleMatch = articleRegex.exec(html)) !== null) {
+        const articleHtml = articleMatch[0];
         
-        // Buscar backdrop (imagen de fondo)
-        const backdropMatch = match[0].match(/src="(https:\/\/cdn\.animeav1\.com\/backdrops\/[^"]*)"/);
-        const backdrop = backdropMatch ? backdropMatch[1] : null;
+        // Extraer título
+        const titleMatch = articleHtml.match(/<<h1[^>]*>(.*?)<<\/h1>/);
+        const title = titleMatch ? titleMatch[1].replace(/<<[^>]*>/g, '').trim() : null;
         
-        featured.push({
-            title,
-            image: backdrop || image,
-            url,
-            source: "animeav1"
-        });
+        // Extraer imagen de backdrop
+        const imgMatch = articleHtml.match(/src="(https:\/\/cdn\.animeav1\.com\/backdrops\/[^"]*)"/);
+        const image = imgMatch ? imgMatch[1] : null;
+        
+        // Extraer URL del anime
+        const urlMatch = articleHtml.match(/href="(\/media\/[^"]*)"/);
+        const url = urlMatch ? resolveAbsoluteUrl(urlMatch[1]) : null;
+        
+        // Extraer año
+        const yearMatch = articleHtml.match(/<<span>(\d{4})<<\/span>/);
+        const year = yearMatch ? yearMatch[1] : null;
+        
+        // Extraer status
+        const statusMatch = articleHtml.match(/En emisión|Próximamente|Finalizado/);
+        const status = statusMatch ? statusMatch[0] : null;
+        
+        // Extraer sinopsis
+        const synopsisMatch = articleHtml.match(/<<p>(.*?)<<\/p>/);
+        const synopsis = synopsisMatch ? synopsisMatch[1].replace(/<<[^>]*>/g, '').trim() : null;
+        
+        // Extraer géneros
+        const genres = [];
+        const genreRegex = /href="\/catalogo\?genre=[^"]*"[^>]*>(.*?)<<\/a>/gi;
+        let genreMatch;
+        while ((genreMatch = genreRegex.exec(articleHtml)) !== null) {
+            genres.push(genreMatch[1]);
+        }
+        
+        if (title && url) {
+            featured.push({
+                title,
+                image,
+                url,
+                year,
+                status,
+                synopsis,
+                genres,
+                source: "animeav1"
+            });
+        }
     }
     
     return featured;
@@ -96,11 +157,13 @@ function extractFeaturedWithRegex(html) {
 
 async function getFeaturedAnime() {
     const html = await fetchHtml(BASE_URL);
+    
+    // Intentar extraer del JSON primero
     let featured = extractFeaturedFromHtml(html);
-
-    // Si no encontramos con JSON, intentar con regex
+    
+    // Si no funciona, extraer de los artículos HTML
     if (!featured || featured.length === 0) {
-        featured = extractFeaturedWithRegex(html);
+        featured = extractFeaturedFromArticles(html);
     }
 
     // Normalizar los datos
@@ -108,13 +171,13 @@ async function getFeaturedAnime() {
         id: item.id || null,
         title: item.title,
         slug: item.slug || null,
-        category: item.category?.name || "TV Anime",
-        year: item.startDate ? item.startDate.split('-')[0] : null,
-        status: item.status === 2 ? "En emisión" : (item.status === 0 ? "Próximamente" : "Finalizado"),
-        genres: item.genres ? item.genres.map(g => g.name) : [],
-        synopsis: item.synopsis || null,
-        image: item.id ? `https://cdn.animeav1.com/backdrops/${item.id}.jpg` : null,
-        url: item.slug ? `https://animeav1.com/media/${item.slug}` : null,
+        category: item.category?.name || (item.genres && item.genres.length > 0 ? "TV Anime" : null),
+        year: item.year || (item.startDate ? item.startDate.split('-')[0] : null),
+        status: item.status || (item.status === 2 ? "En emisión" : (item.status === 0 ? "Próximamente" : "Finalizado")),
+        genres: item.genres ? (typeof item.genres[0] === 'string' ? item.genres : item.genres.map(g => g.name || g)) : [],
+        synopsis: item.synopsis || item.description || null,
+        image: item.image || (item.id ? `https://cdn.animeav1.com/backdrops/${item.id}.jpg` : null),
+        url: item.url || (item.slug ? `https://animeav1.com/media/${item.slug}` : null),
         source: "animeav1"
     }));
 
