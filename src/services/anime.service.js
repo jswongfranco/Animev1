@@ -7,6 +7,7 @@ const hentailaService = require("./hentaila.service");
 const tioanimeService = require("./tioanime.service");
 const monoschinosService = require("./monoschinos.service");
 const latestService = require("./latest.service");  // ← LÍNEA NUEVA
+const newService = require("./new.service");  // ← LÍNEA NUEVA
 
 const DEFAULT_ANIME_DOMAIN = process.env.DEFAULT_ANIME_DOMAIN || "animeav1.com";
 

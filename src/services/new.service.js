@@ -1,171 +1,184 @@
 // src/services/new.service.js
 const axios = require("axios");
-const { URL } = require("node:url");
-const { ApiError } = require("../utils/api-error");
+const cheerio = require("cheerio");
 
-const DEFAULT_DOMAIN = process.env.DEFAULT_ANIME_DOMAIN || "animeav1.com";
-const BASE_URL = `https://${DEFAULT_DOMAIN}`;
-
-const HTTP_HEADERS = {
-    "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-};
+const BASE_URL = "https://animeav1.com";
 
 async function fetchHtml(url) {
+    const { data } = await axios.get(url, {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.9",
+        },
+        timeout: 15000,
+    });
+    return data;
+}
+
+// ─── MÉTODO 1: Extraer del JSON de SvelteKit ───
+function extractNewFromSvelteKit(html) {
     try {
-        const timeout = Number(process.env.REQUEST_TIMEOUT_MS || 15000);
-        const response = await axios.get(url, {
-            timeout,
-            headers: HTTP_HEADERS,
-            maxRedirects: 5,
-            validateStatus: (status) => status >= 200 && status < 400,
-        });
-        return response.data;
+        // Buscar el script que contiene los datos de la página
+        const scriptMatch = html.match(/<<script[^>]*>\s*try\s*\{[^}]*\}\s*catch[^}]*\}\s*<<\/script>\s*<<script[^>]*>([\s\S]*?)<<\/script>/);
+        
+        if (!scriptMatch) return null;
+
+        // Buscar el objeto data que contiene latestMedia
+        // El JSON de SvelteKit puede tener keys sin comillas (formato JS object)
+        const dataMatch = html.match(/["']?data["']?\s*:\s*(\{[\s\S]*?\}),\s*["']?errors["']?/);
+        if (!dataMatch) return null;
+
+        // Extraer latestMedia del JSON-like
+        // Buscamos el array latestMedia dentro del JSON
+        const latestMediaMatch = html.match(/latestMedia\s*:\s*(\[[\s\S]*?\]),\s*(?:trending|featured|errors)/);
+        if (!latestMediaMatch) return null;
+
+        // Convertir el JSON-like a JSON válido
+        let jsonStr = latestMediaMatch[1]
+            // Keys sin comillas → con comillas
+            .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+            // Comillas simples a dobles
+            .replace(/'/g, '"')
+            // Valores undefined/null
+            .replace(/:\s*undefined\b/g, ':null')
+            // Trailing commas
+            .replace(/,\s*([\]}])/g, '$1');
+
+        const latestMedia = JSON.parse(jsonStr);
+        return latestMedia;
     } catch (error) {
-        throw new ApiError(500, "No se pudo obtener contenido desde AnimeAV1", error.message);
-    }
-}
-
-function resolveAbsoluteUrl(urlCandidate, domain = DEFAULT_DOMAIN) {
-    if (!urlCandidate || typeof urlCandidate !== "string") {
-        return null;
-    }
-    try {
-        const base = `https://${domain}`;
-        return new URL(urlCandidate, base).toString();
-    } catch (_error) {
+        console.log("[new.service] SvelteKit extraction failed:", error.message);
         return null;
     }
 }
 
-function extractNewAnimeFromHtml(html) {
-    // El JSON está en el script de SvelteKit con este formato exacto:
-    // data: [null, {type:"data",data:{..., latestMedia:[...]}}]
-    
-    // Buscar el bloque completo que contiene latestMedia (IGUAL que featured pero buscando latestMedia)
-    const fullDataMatch = html.match(/data\s*:\s*\[\s*null\s*,\s*\{\s*type\s*:\s*"data"\s*,\s*data\s*:\s*\{([\s\S]*?)\}\s*,\s*uses\s*:\s*\{\s*\}\s*\}\s*\]/);
-    
-    if (fullDataMatch) {
-        const dataBlock = fullDataMatch[1];
-        
-        // Extraer solo el array latestMedia (está DESPUÉS de latestEpisodes, antes de uses)
-        // El patrón es: latestMedia:[{...}], uses:{}
-        const latestMediaMatch = dataBlock.match(/latestMedia\s*:\s*(\[[\s\S]*?\]),\s*uses/);
-        
-        if (latestMediaMatch) {
-            try {
-                let jsonStr = latestMediaMatch[1];
-                
-                // Limpiar el JSON: las keys no tienen comillas en el HTML de SvelteKit
-                jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-                
-                // Limpiar trailing commas
-                jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-                
-                const latestMedia = JSON.parse(jsonStr);
-                return latestMedia;
-            } catch (e) {
-                console.log("Error parseando latestMedia:", e.message);
-            }
-        }
-    }
-    
-    // Fallback: buscar con regex más simple (igual que featured)
-    const simpleMatch = html.match(/latestMedia\s*:\s*(\[[\s\S]{100,10000}?\])\s*,\s*uses/);
-    if (simpleMatch) {
-        try {
-            let jsonStr = simpleMatch[1];
-            jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-            jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-            const latestMedia = JSON.parse(jsonStr);
-            return latestMedia;
-        } catch (e) {
-            console.log("Error parseando simple latestMedia:", e.message);
-        }
-    }
-    
-    return [];
-}
-
+// ─── MÉTODO 2: Fallback - Scrapear HTML directamente ───
 function extractNewFromArticles(html) {
-    // Extraer directamente de los <article> de "Recientemente Agregados"
+    const $ = cheerio.load(html);
     const newAnime = [];
-    
-    // Buscar la sección "Animes" - "Recientemente Agregados"
-    const sectionMatch = html.match(/Animes[\s\S]*?Recientemente Agregados[\s\S]*?<<div class="grid grid-cols-2[\s\S]*?<<\/section>/);
-    
-    if (!sectionMatch) return [];
-    
-    const sectionHtml = sectionMatch[0];
-    
-    // Buscar cada artículo
-    const articleRegex = /<article[^>]*>[\s\S]*?<\/article>/g;
-    let match;
-    
-    while ((match = articleRegex.exec(sectionHtml)) !== null) {
-        const article = match[0];
+
+    // Buscar la sección "Recientemente Agregados"
+    // animeav1 usa h2 con ese texto, seguido de articles o divs con animes
+    const sectionHeading = $("h2, h3, .section-title").filter(function () {
+        const text = $(this).text().trim().toLowerCase();
+        return text.includes("recientemente agregados") || text.includes("nuevos animes");
+    }).first();
+
+    if (!sectionHeading.length) {
+        // Fallback: buscar por estructura de cards
+        console.log("[new.service] Section heading not found, trying generic card structure");
+    }
+
+    // Buscar articles/cards después del heading
+    const container = sectionHeading.length ? sectionHeading.next() : $("body");
+    const articles = container.find("article, .anime-card, [class*='card'], .media-item").length 
+        ? container.find("article, .anime-card, [class*='card'], .media-item")
+        : $("article, .anime-card, [class*='card'], .media-item");
+
+    articles.each((_, article) => {
+        const $article = $(article);
         
-        // Título (en el alt de la imagen: "Portada de Tiger & Bunny")
-        const titleMatch = article.match(/alt="Portada de ([^"]*)"/);
-        const title = titleMatch ? titleMatch[1] : null;
-        
-        // Imagen (portada/cover)
-        const imgMatch = article.match(/src="(https:\/\/cdn\.animeav1\.com\/covers\/[^"]*)"/);
-        const image = imgMatch ? imgMatch[1] : null;
+        // Título
+        const titleEl = $article.find("h3, h4, .title, [class*='title'], a").first();
+        const title = titleEl.text().trim();
         
         // URL
-        const urlMatch = article.match(/href="(\/media\/[^"]*)"/);
-        const url = urlMatch ? resolveAbsoluteUrl(urlMatch[1]) : null;
+        const linkEl = $article.find("a").first();
+        const href = linkEl.attr("href") || "";
+        const url = href.startsWith("http") ? href : href.startsWith("/") ? `${BASE_URL}${href}` : `${BASE_URL}/${href}`;
         
-        // Tipo (TV Anime, Película, OVA, Especial)
-        const typeMatch = article.match(/<<div class="rounded[^>]*>(.*?)<<\/div>/);
-        const type = typeMatch ? typeMatch[1].trim() : "TV Anime";
+        // Imagen
+        const imgEl = $article.find("img").first();
+        const image = imgEl.attr("src") || imgEl.attr("data-src") || imgEl.attr("data-lazy-src") || null;
         
-        if (title && url) {
+        // Slug desde URL
+        const slugMatch = url.match(/\/media\/([^/?#]+)/);
+        const slug = slugMatch ? slugMatch[1] : null;
+        
+        // ID desde slug o imagen
+        const idMatch = (image || "").match(/\/covers\/(\d+)\.jpg/) || (slug || "").match(/^(\d+)-/);
+        const id = idMatch ? idMatch[1] : null;
+
+        // Metadata del texto
+        const metaText = $article.text();
+        const yearMatch = metaText.match(/\b(19\d{2}|20\d{2})\b/);
+        const year = yearMatch ? yearMatch[1] : null;
+
+        // Categoría/Tipo
+        const categoryMatch = metaText.match(/(TV|OVA|ONA|Película|Movie|Especial|Special)\s*(?:Anime)?/i);
+        const category = categoryMatch ? categoryMatch[1] : "TV Anime";
+
+        if (title) {
             newAnime.push({
                 title,
-                image,
-                url,
-                type,
+                slug,
+                id,
+                image: image ? (image.startsWith("http") ? image : `${BASE_URL}${image}`) : (id ? `https://cdn.animeav1.com/covers/${id}.jpg` : null),
+                url: url || (slug ? `${BASE_URL}/media/${slug}` : null),
+                year,
+                category,
+                synopsis: null, // No hay sinopsis en la lista compacta
+                createdAt: null,
                 source: "animeav1"
             });
         }
-    }
-    
+    });
+
     return newAnime;
+}
+
+// ─── MÉTODO 3: Extraer del JSON inline en script (formato exacto de animeav1) ───
+function extractNewFromInlineJson(html) {
+    try {
+        // animeav1 a veces pone el data como window.__DATA__ o similar
+        const inlineMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\});/) ||
+                           html.match(/window\.__DATA__\s*=\s*(\{[\s\S]*?\});/);
+        
+        if (!inlineMatch) return null;
+        
+        const data = JSON.parse(inlineMatch[1]);
+        return data.latestMedia || data.newAnime || data.recentlyAdded || null;
+    } catch (error) {
+        return null;
+    }
 }
 
 async function getNewAnime() {
     const html = await fetchHtml(BASE_URL);
+
+    // Intentar múltiples métodos en orden de preferencia
+    let newAnime = extractNewFromSvelteKit(html);
     
-    // Intentar extraer del JSON de SvelteKit (igual que featured)
-    let newAnime = extractNewAnimeFromHtml(html);
+    if (!newAnime || newAnime.length === 0) {
+        newAnime = extractNewFromInlineJson(html);
+    }
     
-    // Si falla, extraer de los artículos HTML directamente
     if (!newAnime || newAnime.length === 0) {
         newAnime = extractNewFromArticles(html);
     }
 
-    // Normalizar
+    // Normalizar al formato estándar de la API
     const normalized = newAnime.map(item => ({
         id: item.id || null,
-        title: item.title,
+        title: item.title || item.name || "Sin título",
         slug: item.slug || null,
-        category: item.category?.name || item.type || "TV Anime",
-        year: item.year || (item.createdAt ? item.createdAt.split('-')[0] : null),
-        synopsis: item.synopsis || item.description || null,
-        image: item.image || (item.id ? `https://cdn.animeav1.com/covers/${item.id}.jpg` : null),
+        category: item.category?.name || item.type || item.category || "TV Anime",
+        year: item.year || (item.createdAt ? item.createdAt.split("-")[0] : null) || (item.startDate ? item.startDate.split("-")[0] : null),
+        synopsis: item.synopsis || item.description || item.overview || null,
+        image: item.image || item.cover || item.poster || item.banner || (item.id ? `https://cdn.animeav1.com/covers/${item.id}.jpg` : null),
         url: item.url || (item.slug ? `https://animeav1.com/media/${item.slug}` : null),
-        createdAt: item.createdAt || null,
+        createdAt: item.createdAt || item.addedAt || item.created_at || null,
         source: "animeav1"
     }));
 
+    // Filtrar items sin título
+    const validItems = normalized.filter(item => item.title && item.title !== "Sin título");
+
     return {
         success: true,
-        data: normalized,
-        count: normalized.length,
+        data: validItems,
+        count: validItems.length,
         source: "animeav1",
     };
 }
